@@ -30,14 +30,47 @@ data<-data%>%select(-X)
 ###Calculate correlation
 ```{r}
 ############## Correlation Matrix ####################################
-corr_matrix <- cor(t(expression), method = "pearson")
+cormatrix <- cor(t(data), method = "pearson")
 # Test out correlation
+cormatrix.df<-tbl_df(as.data.frame(cormatrix))
 
+rownames(cormatrix.df)<-colnames(cormatrix.df)%>%t()
 
-
-View(x)
+cormatrix.df<-cormatrix.df%>%add_rownames()
+colnames(cormatrix.df)[1]<-"plasmoId"
 ```
-Prepare GO terms
+
+###Test different method
+####aNN
+```{r}
+k<-10 ###set k=10
+total_neighbors<-cormatrix.df[,1]
+for(i in 2:length(cormatrix.df)){
+  neighbors<-cormatrix.df[,c(1,i)]%>%top_n(k+1)
+  total_neighbors<-left_join(total_neighbors,neighbors,by="plasmoId")
+}
+
+write.csv(total_neighbors,"neighbors.csv")
+total_neighbors<-read.csv("neighbors.csv",header = TRUE)
+
+total_neighbors<-total_neighbors%>%select(-X)
+rownames(total_neighbors)<-total_neighbors[,1]
+total_neighbors<-total_neighbors[,-1]
+
+total_neighbors[!is.na(total_neighbors)]<-1
+total_neighbors[is.na(total_neighbors)]<-0
+
+```
+
+```{r}
+
+
+```
+
+
+
+
+###Prepare GO terms
 ```{r}
 ################ Get Go data and wrangle  ############################
 go_data <- read_tsv("gene_association.Pfalciparum.1.4.2016.tsv", col_names = FALSE)
