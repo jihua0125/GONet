@@ -1,0 +1,29 @@
+---
+title: "method-0509.Rmd"
+author: "Ji Hua"
+date: "2016年5月9日"
+output: html_document
+---
+
+##Preparation
+
+###Library
+```{r}
+library()
+library(readr)
+library(dplyr)
+library(stringr)
+```
+
+###Load Data
+Contains a compound-specific response index for each gene  obtained by normalizing the gene’s average transcript level following perturbations in the 2 clones against its average level across all perturbations within the same experimental batch. All analyses in the paper are conducted using this processed data set. 
+```{r}
+data<-read.table("expression_data.csv",sep="\t",header=TRUE)
+data[is.na(data)]<-0
+
+rownames(data)<-data[,1]
+data<-data%>%select(-PlasmoDBID)
+
+colnames(data)
+```
+
