@@ -5,25 +5,80 @@ date: "2016年5月9日"
 output: html_document
 ---
 
-##Preparation
 
-###Library
 ```{r}
-library()
+library(XLConnect)
 library(readr)
 library(dplyr)
+library(tidyr)
 library(stringr)
-```
 
-###Load Data
-Contains a compound-specific response index for each gene  obtained by normalizing the gene’s average transcript level following perturbations in the 2 clones against its average level across all perturbations within the same experimental batch. All analyses in the paper are conducted using this processed data set. 
-```{r}
-data<-read.table("expression_data.csv",sep="\t",header=TRUE)
-data[is.na(data)]<-0
+setwd("/Users/mdbasunia/Desktop/Azfar/Academics/HSPH/Spring16/Genomic_Data_Manipulation/Group/Project/Malaria")
 
-rownames(data)<-data[,1]
-data<-data%>%select(-PlasmoDBID)
+######### Read from excel################
+wb_all <- loadWorkbook("Expression.xlsx")
+setMissingValue(wb_all, value = "NA")
+lst_expr = readWorksheet(wb_all, sheet = getSheets(wb_all)[4]) %>% tbl_df()
 
-colnames(data)
+########### Normalized expression data for all conditions#############
+# Exclude all Non coding RNAs
+expression <- na.exclude(lst_expr) %>% filter(!grepl("NON_CODING", PlasmoDBID))
+row.names(expression) <- expression$PlasmoDBID
+expression <- expression %>% select(-PlasmoDBID)
+
+#  PCA on the normalized expression matrix
+#pc <- prcomp(as.matrix(expression))
+#sum(pc$sdev[1:15]^2)/sum(pc$sdev^2)
+#pcData<-pc$x[,1:15]
+
+################ Get Go data and wrangle  ############################
+go_data <- read_tsv("gene_association.Pfalciparum.1.4.2016.tsv", col_names = FALSE)
+go_data <- go_data %>% select(c(X17, X3, X5)) 
+colnames(go_data) <- c("PlasmoDBID.V2", "OffGeneName", "GoTerm")
+ids <- read_tsv("ids.txt")[, 1:3]
+colnames(ids) <- c("PlasmoDBID", "PlasmoDBID.V2", "Description")
+go_data <- left_join(go_data, ids)
+
+
+############## Correlation Matrix ####################################
+corr_matrix <- cor(t(expression), method = "pearson")
+# Test out correlation
+x <- corr_matrix[,"PFB0425c"]
+x <- x %>% data.frame() 
+colnames(x) <- "RelExpression"
+x_filt <- x %>% add_rownames() %>% tbl_df() %>% filter(rowname %in% genes_with_go_term$PlasmoDBID) %>% filter(RelExpression >= 0.9)
+x_filt %>% mutate(GoTerm = filter(go_term, go_term$PlasmoDBID == x_filt$rowname))
+
+
+View(x)
+
+############ Add Go Data to PCA data#############
+pc_bckup <- as.data.frame(pcData) %>% tbl_df() %>% mutate("PlasmoDBID" = row.names(pcData))
+pc_bckup <- go_data %>%
+  select(c(GoTerm, PlasmoDBID)) %>%
+  right_join(pc_bckup)
+# Calculate corr
+# Separate into 2 tables : Genes with Go
+pc_no_go_term <- pc_bckup[is.na(pc_bckup), ]
+pc_with_go_term <- pc_bckup[!is.na(pc_bckup), ] %>%
+  group_by(GoTerm) %>%
+  summarize(num_genes = n()) %>%
+  filter(num_genes > 50)
+####### Each Gene and Go terms
+go_term <- pc_with_go_term %>%
+  select(GoTerm, PlasmoDBID) 
+####### Get genes with and without Go term
+# Get genes with no  go term
+genes_with_no_go_term <- pc_no_go_term %>%
+  select(PlasmoDBID) %>%
+  unique() %>% na.exclude()
+# Genes with go term
+genes_with_go_term <- pc_with_go_term %>%
+  select(PlasmoDBID) %>%
+  unique() %>% na.exclude()
+
+  
+
+
 ```
 
