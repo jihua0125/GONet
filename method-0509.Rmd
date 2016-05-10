@@ -63,22 +63,98 @@ total_neighbors[is.na(total_neighbors)]<-0
 ```
 
 ```{r}
+index <- which(total_neighbors==1, arr.ind=TRUE)
+double_neighbors<-total_neighbors
+
+for(i in 1:nrow(index)){
+  col<-index[i,2]
+  row<-index[i,1]
+  if(total_neighbors[row,col]!=total_neighbors[col,row]){
+    double_neighbors[row,col]<-0
+    double_neighbors[col,row]<-0
+  }
+}
+
+write.csv(double_neighbors,"mnn_neighbors.csv")
 
 
 ```
 
 
-
-
 ###Prepare GO terms
+
 ```{r}
 ################ Get Go data and wrangle  ############################
-go_data <- read_tsv("gene_association.Pfalciparum.1.4.2016.tsv", col_names = FALSE)
-go_data <- go_data %>% select(c(X17, X3, X5)) 
-colnames(go_data) <- c("PlasmoDBID.V2", "OffGeneName", "GoTerm")
-ids <- read_tsv("ids.txt")[, 1:3]
-colnames(ids) <- c("PlasmoDBID", "PlasmoDBID.V2", "Description")
-go_data <- left_join(go_data, ids)
+library("GO.db")
+###Prepare GO terms
+#MF: "GO:0003674"
+#BP: "GO:0008150"
+#CC: "GO:0005575"
+
+mfRoot<-"GO:0003674"
+bpRoot<-"GO:0008150"
+ccRoot<-"GO:0005575"
+
+GO_data<-read.csv("PasmoDBID_and_GO_unprocessed.csv",stringsAsFactors = FALSE)
+
+mfChildren<-GOMFCHILDREN[[mfRoot]]
+bpChildren<-GOBPCHILDREN[[bpRoot]]
+ccChildren<-GOCCCHILDREN[[ccRoot]]
+#nrow(GO_data)
+GO_table<-data.frame(plasomDBID=character(0),GOTerm=character(0),GOAncestor=character(0),GOBranch=character(0))
+for (j in 1:nrow(GO_data)){
+  obs<-GO_data[j,]
+  flag<-NULL
+  if(!is.null(GOBPANCESTOR[[obs[1,2]]])){
+    flag<-"bp"
+    ancester<-GOBPANCESTOR[[obs[1,2]]]
+    if(bpRoot== ancester[[1]]){
+      obs<-cbind(obs,bpRoot,flag)
+    }else{
+      for(i in ancester){
+        if (i %in% bpChildren){
+          obs<-cbind(obs,as.vector(i),flag)
+          break
+        }
+      }
+    }
+  }
+  if(!is.null(GOCCANCESTOR[[obs[1,2]]])){
+    flag<-"cc"
+    ancester<-GOCCANCESTOR[[obs[1,2]]]
+    if(ccRoot == ancester[[1]]){
+      obs<-cbind(obs,ccRoot,flag)
+    }else{
+        for(i in ancester){
+        if (i %in% ccChildren){
+          obs<-cbind(obs,as.vector(i),flag)
+          break
+        }
+      }
+    }
+  }
+  if(!is.null(GOMFANCESTOR[[obs[1,2]]])){
+    flag<-"mf"
+    ancester<-GOMFANCESTOR[[obs[1,2]]]
+    if(mfRoot == ancester[[1]]){
+      obs<-cbind(obs,mfRoot,flag)
+    }else{
+      for(i in ancester){
+        if (i %in% mfChildren){
+          obs<-cbind(obs,as.vector(i),flag)
+          break
+        }
+      }
+    }
+  }
+  if(is.null(flag))
+    next
+  colnames(obs)<-c("plasomDBID","GOTerm","GOAncestor","GOBranch")
+  GO_table<-rbind(GO_table,obs)
+  print(j)
+  
+}
+
 
 ```
 
