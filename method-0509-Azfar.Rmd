@@ -1,0 +1,246 @@
+---
+title: "method-0509.Rmd"
+author: "Ji Hua"
+date: "2016-05-09"
+output: html_document
+---
+#GONet
+
+##Preparation
+
+###Library
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(readr)
+```
+
+###Read Data
+```{r}
+######### Read from excel################
+data<-read.csv("expression.csv",header = TRUE)
+
+data[is.na(data)]<-0
+
+rownames(data)<-data[,1]
+data<-data%>%select(-X)
+```
+###Calculate correlation
+```{r}
+############## Correlation Matrix ####################################
+cormatrix <- cor(t(data), method = "pearson")
+# Test out correlation
+cormatrix.df<-tbl_df(as.data.frame(cormatrix))
+
+rownames(cormatrix.df)<-colnames(cormatrix.df)%>%t()
+
+cormatrix.df<-cormatrix.df%>%add_rownames()
+colnames(cormatrix.df)[1]<-"plasmoId"
+write_csv(cormatrix.df, "correlation_matrix_df.csv")
+```
+
+### Getting predictor and unknown Table
+Known table : Vector of Genes with known GOTerms
+Unknown table : Vector Genes without GOTerms whose functions we are trying to predict
+```{r}
+KnownGenes <- read_csv("genes_with_go_term.csv")
+UnknownGenes <- read_csv("genes_with_no_go_term.csv")
+```
+
+###Test different method
+####aNN
+```{r, eval=FALSE}
+k<-10 ###set k=10
+total_neighbors<-cormatrix.df[,1]
+for(i in 2:length(cormatrix.df)){
+  neighbors<-cormatrix.df[,c(1,i)]%>%top_n(k+1)
+  total_neighbors<-left_join(total_neighbors,neighbors,by="plasmoId")
+}
+
+#write.csv(total_neighbors,"neighbors.csv")
+
+```
+
+#### aKNN read
+```{r}
+total_neighbors<-read.csv("neighbors.csv",header = TRUE)
+
+total_neighbors<-total_neighbors%>%select(-X)
+rownames(total_neighbors)<-total_neighbors[,1]
+total_neighbors<-total_neighbors[,-1]
+
+total_neighbors[!is.na(total_neighbors)]<-1
+total_neighbors[is.na(total_neighbors)]<-0
+
+```
+
+```{r, eval=FALSE}
+index <- which(total_neighbors==1, arr.ind=TRUE)
+double_neighbors<-total_neighbors
+
+for(i in 1:nrow(index)){
+  col<-index[i,2]
+  row<-index[i,1]
+  if(total_neighbors[row,col]!=total_neighbors[col,row]){
+    double_neighbors[row,col]<-0
+    double_neighbors[col,row]<-0
+  }
+}
+
+write.csv(double_neighbors,"mnn_neighbors.csv")
+
+
+```
+
+
+###Prepare GO terms
+
+```{r, eval=FALSE}
+################ Get Go data and wrangle  ############################
+library("GO.db")
+###Prepare GO terms
+#MF: "GO:0003674"
+#BP: "GO:0008150"
+#CC: "GO:0005575"
+
+mfRoot<-"GO:0003674"
+bpRoot<-"GO:0008150"
+ccRoot<-"GO:0005575"
+
+GO_data<-read.csv("PasmoDBID_and_GO_unprocessed.csv",stringsAsFactors = FALSE)
+
+mfChildren<-GOMFCHILDREN[[mfRoot]]
+bpChildren<-GOBPCHILDREN[[bpRoot]]
+ccChildren<-GOCCCHILDREN[[ccRoot]]
+#nrow(GO_data)
+GO_table<-data.frame(plasomDBID=character(0),GOTerm=character(0),GOAncestor=character(0),GOBranch=character(0))
+for (j in 1:nrow(GO_data)){
+  obs<-GO_data[j,]
+  flag<-NULL
+  if(!is.null(GOBPANCESTOR[[obs[1,2]]])){
+    flag<-"bp"
+    ancester<-GOBPANCESTOR[[obs[1,2]]]
+    if(bpRoot== ancester[[1]]){
+      obs<-cbind(obs,bpRoot,flag)
+    }else{
+      for(i in ancester){
+        if (i %in% bpChildren){
+          obs<-cbind(obs,as.vector(i),flag)
+          break
+        }
+      }
+    }
+  }
+  if(!is.null(GOCCANCESTOR[[obs[1,2]]])){
+    flag<-"cc"
+    ancester<-GOCCANCESTOR[[obs[1,2]]]
+    if(ccRoot == ancester[[1]]){
+      obs<-cbind(obs,ccRoot,flag)
+    }else{
+        for(i in ancester){
+        if (i %in% ccChildren){
+          obs<-cbind(obs,as.vector(i),flag)
+          break
+        }
+      }
+    }
+  }
+  if(!is.null(GOMFANCESTOR[[obs[1,2]]])){
+    flag<-"mf"
+    ancester<-GOMFANCESTOR[[obs[1,2]]]
+    if(mfRoot == ancester[[1]]){
+      obs<-cbind(obs,mfRoot,flag)
+    }else{
+      for(i in ancester){
+        if (i %in% mfChildren){
+          obs<-cbind(obs,as.vector(i),flag)
+          break
+        }
+      }
+    }
+  }
+  if(is.null(flag))
+    next
+  colnames(obs)<-c("plasomDBID","GOTerm","GOAncestor","GOBranch")
+  GO_table<-rbind(GO_table,obs)
+  print(j)
+  
+}
+
+
+```
+read GOTable
+```{r}
+GOTable <- read_csv("GO_table2.csv")
+GOTable <- GOTable[, 2:ncol(GOTable)]
+
+```
+### KNN matrix
+Function to get top k most correlated known genes for each unknown gene
+```{r}
+testUnknownGenes <- sample_n(UnknownGenes, 20)
+testKnownGenes <- sample_n(KnownGenes, 100)
+
+getKGenes <- function(unknown, known, full_correlation_df, k){
+  unknown <- rbind(unknown, "plasmoId")
+  table <- full_correlation_df[, unknown$PlasmoDBID] 
+  table <- table %>% dplyr::filter(plasmoId %in% known$PlasmoDBID)
+  #row.names(table) <- table$plasmoId
+  n <- ncol(table)-1
+  for (i in 1:n){
+    new <- table %>% dplyr::select(i, ncol(table)) # takeplasmoDBID and col i
+    new <- as.data.frame(new)
+    cname <- colnames(new)
+    new <- new[order(new[,1], decreasing = TRUE), ] %>% 
+      tbl_df() %>% 
+      select(-plasmoId) %>% # -plasmoId for getting expression levels
+      slice(1:k)
+    colnames(new) <- cname[1]
+    if (i==1){output<-new}else{
+     output <- cbind(output, new)
+    }
+  }
+  return(output)
+}
+
+#testTable <- getKGenes(testUnknownGenes, testKnownGenes, cormatrix.df, 50)
+#View(testTable)
+# Gene names
+knn_50_unk <- getKGenes(UnknownGenes, KnownGenes, cormatrix.df, 50)
+knn_100_unk <- getKGenes(UnknownGenes, KnownGenes, cormatrix.df, 100)
+knn_50_known <- getKGenes(KnownGenes, KnownGenes, cormatrix.df, 50)
+knn_100_known <- getKGenes(KnownGenes, KnownGenes, cormatrix.df, 100)
+# Expression levels - change -plasmoId in the orginal function
+knn_50_unk_expr <- getKGenes(UnknownGenes, KnownGenes, cormatrix.df, 50)
+knn_100_unk_expr <- getKGenes(UnknownGenes, KnownGenes, cormatrix.df, 100)
+knn_50_known_expr <- getKGenes(KnownGenes, KnownGenes, cormatrix.df, 50)
+knn_100_known_expr <- getKGenes(KnownGenes, KnownGenes, cormatrix.df, 100)
+
+#write_csv(knn_50_unk_expr, "knn_50_unk_expr.csv")
+```
+
+### Edge matrix
+
+```{r,expr=FALSE}
+GOSub<- function(GO_tab, knn_tab){
+  col_num <- ncol(knn_tab)+1
+  col_name <- c("GOTerm", colnames(knn_tab))
+  row_num <- GO_tab %>% dplyr::select(GOTerm) %>% unique() %>% nrow()
+  row_name <- GO_tab %>% dplyr::select(GOTerm) %>% unique()
+  output <- data.frame(matrix(ncol = col_num, nrow = row_num))
+  colnames(output) <- col_name
+  O2 <- right_join()
+
+}
+```
+
+```{r}
+knn_tab <- knn_50_unk
+GO_tab <- GOTable
+
+
+```
+
