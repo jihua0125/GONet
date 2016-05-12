@@ -15,6 +15,110 @@ library(readr)
 library(dplyr)
 library(tidyr)
 library(stringr)
+library(ggplot2)
+```
+
+###Prepare GO terms
+
+```{r}
+################ Get Go data and wrangle  ############################
+library("GO.db")
+###Prepare GO terms
+#MF: "GO:0003674"
+#BP: "GO:0008150"
+#CC: "GO:0005575"
+
+mfRoot<-"GO:0003674"
+bpRoot<-"GO:0008150"
+ccRoot<-"GO:0005575"
+
+GO_data<-read.csv("PasmoDBID_and_GO_unprocessed.csv",stringsAsFactors = FALSE)
+
+mfChildren<-GOMFCHILDREN[[mfRoot]]
+bpChildren<-GOBPCHILDREN[[bpRoot]]
+ccChildren<-GOCCCHILDREN[[ccRoot]]
+#nrow(GO_data)
+GO_table<-data.frame(plasomDBID=character(0),GOTerm=character(0),GOAncestor=character(0),GOBranch=character(0))
+for (j in 1:nrow(GO_data)){
+  obs<-GO_data[j,]
+  rm(temp)
+  #newobs<-data.frame(plasomDBID=character(0),GOTerm=character(0))
+  flag<-NULL
+  if(!is.null(GOBPANCESTOR[[obs[1,2]]])){
+    flag<-"bp"
+    ancester<-GOBPANCESTOR[[obs[1,2]]]
+    if(bpRoot== ancester[[1]]&& length(ancester)<=2){
+      temp<-cbind(obs,obs[1,2],flag)
+      newobs<-temp
+    }else{
+        newobs<-data.frame(plasomDBID=character(0),GOTerm=character(0),GOAncestor=character(0),GOBranch=character(0))
+        for(i in ancester){
+          if (i %in% bpChildren){
+            temp<-cbind(obs,as.vector(i),flag)
+            newobs<-rbind(newobs,temp)
+            #break
+          }
+        }
+    }
+  }
+  if(!is.null(GOCCANCESTOR[[obs[1,2]]])){
+    flag<-"cc"
+    ancester<-GOCCANCESTOR[[obs[1,2]]]
+    if(ccRoot == ancester[[1]]&& length(ancester)<=2){
+      temp<-cbind(obs,obs[1,2],flag)
+      newobs<-temp
+    }else{
+        newobs<-data.frame(plasomDBID=character(0),GOTerm=character(0),GOAncestor=character(0),GOBranch=character(0))
+        for(i in ancester){
+        if (i %in% ccChildren){
+          #obs<-cbind(obs,as.vector(i),flag)
+          #break
+          temp<-cbind(obs,as.vector(i),flag)
+          newobs<-rbind(newobs,temp)
+        }
+      }
+    }
+  }
+  if(!is.null(GOMFANCESTOR[[obs[1,2]]])){
+    flag<-"mf"
+    ancester<-GOMFANCESTOR[[obs[1,2]]]
+    if(mfRoot == ancester[[1]]&& length(ancester)<=2){
+      temp<-cbind(obs,obs[1,2],flag)
+      newobs<-temp
+    }else{
+      newobs<-data.frame(plasomDBID=character(0),GOTerm=character(0),GOAncestor=character(0),GOBranch=character(0))
+      for(i in ancester){
+        if (i %in% mfChildren){
+          #obs<-cbind(obs,as.vector(i),flag)
+          #break
+          temp<-cbind(obs,as.vector(i),flag)
+          newobs<-rbind(newobs,temp)
+          
+        }
+      }
+    }
+  }
+  if(is.null(flag))
+    next
+  colnames(newobs)<-c("plasomDBID","GOTerm","GOAncestor","GOBranch")
+  GO_table<-rbind(GO_table,newobs)
+  print(j)
+  
+}
+write.csv(GO_table,"GO_table2.csv")
+
+```
+
+```{r}
+GO_table<-GO_table%>%filter(complete.cases(.))
+
+bpTable<-GO_table%>%filter(GOBranch=="bp")
+ccTable<-GO_table%>%filter(GOBranch=="cc")
+
+colnames(bpTable)[1]<-"plasmoDBID"
+
+bpTable.merged<-bpTable%>%left_join(double_neighbors,by="plasmoDBID")
+
 ```
 
 ###Read Data
@@ -25,19 +129,104 @@ data<-read.csv("expression.csv",header = TRUE)
 data[is.na(data)]<-0
 
 rownames(data)<-data[,1]
-data<-data%>%select(-X)
+data<-data%>%dplyr::select(-X)
 ```
 ###Calculate correlation
 ```{r}
 ############## Correlation Matrix ####################################
 cormatrix <- cor(t(data), method = "pearson")
+
 # Test out correlation
 cormatrix.df<-tbl_df(as.data.frame(cormatrix))
-
+write.csv(cormatrix.df,"correlation.csv")
 rownames(cormatrix.df)<-colnames(cormatrix.df)%>%t()
 
 cormatrix.df<-cormatrix.df%>%add_rownames()
-colnames(cormatrix.df)[1]<-"plasmoId"
+colnames(cormatrix.df)[1]<-"plasmoDBID"
+
+total<-read.csv("total_data.csv",sep = "\t")
+
+total<-total%>%tbl_df%>%select(PlasmoDBID,known)
+
+ids<-read.csv("ids.csv",sep = "\t")
+ids<-ids%>%tbl_df%>%select(PlasmoDBID1,PlasmoDBID2)
+
+total.merged<-total%>%left_join(ids,by=c("PlasmoDBID"="PlasmoDBID2"))
+
+total.merged%>%select(PlasmoDBID1,known)%>%write.csv("known_unknown_gene.csv")
+
+total.merged<-total.merged%>%select(PlasmoDBID1,known)
+colnames(total.merged)<-c("PlasmoDBID","known")
+knownGeneList<-total.merged%>%filter(known==1)
+unkownGeneList<-total.merged%>%filter(known==0)
+
+GO_table<-read.csv("GO_table2.csv",stringsAsFactors = F)
+GO_table<-GO_table%>%dplyr::select(-X)
+GO_table<-GO_table%>%filter(complete.cases(.))
+colnames(GO_table)[1]<-"PlasmoDBID"
+aa<-GO_table[,c(1,3,4)]%>%distinct()
+aa<-aa%>%filter(GOAncestor!="GO:0005623")
+GO_table<-GO_table%>%group_by(GOTerm)%>%mutate(count=n())
+aaa<-GO_table%>%select(GOTerm,count)%>%distinct()
+write.table(aa,"complete_GO_table.csv",sep="\t", row.names = FALSE, quote = FALSE)
+
+mfTable<-GO_table%>%filter(GOBranch=="mf")
+
+goKnownTable<-GO_table%>%right_join(knownGeneList)%>%distinct()
+
+goKnownTable<-goKnownTable[,c(1,3,4,5)]
+
+goKnownTable<-goKnownTable%>%distinct()
+
+colnames(goKnownTable)[3]<-c("GOLabel")
+
+write.csv(goKnownTable,"annotated_known_gene.csv",row.names = FALSE)
+#write.csv(unkownGeneList,"unknown_gene.csv",row.names = FALSE)
+
+goKnownTable%>%group_by(GOBranch)%>%summarise(n())
+bpTable<-goKnownTable%>%filter(GOBranch=="bp")%>%group_by(GOLabel)%>%summarise(n())
+mfTable<-goKnownTable%>%filter(GOBranch=="mf")%>%group_by(GOLabel)%>%summarise(n())
+ccTable<-goKnownTable%>%filter(GOBranch=="cc")%>%group_by(GOLabel)%>%summarise(n())
+
+bpTable[,1]<-lapply(bpTable[,1], as.character)
+ccTable[,1]<-lapply(ccTable[,1], as.character)
+mfTable[,1]<-lapply(mfTable[,1], as.character)
+
+nOffspring<-list()
+for(i in 1:nrow(bpTable)){
+  nOffspring[[i]]<-length(GOBPOFFSPRING[[as.character(bpTable[i,1])]])
+}
+bpTable<-cbind(bpTable,unlist(nOffspring))
+
+nOffspring<-list()
+for(i in 1:nrow(ccTable)){
+  nOffspring[[i]]<-length(GOCCOFFSPRING[[as.character(ccTable[i,1])]])
+}
+ccTable<-cbind(ccTable,unlist(nOffspring))
+
+nOffspring<-list()
+for(i in 1:nrow(mfTable)){
+  nOffspring[[i]]<-length(GOMFOFFSPRING[[as.character(mfTable[i,1])]])
+}
+mfTable<-cbind(mfTable,unlist(nOffspring))
+
+bpTable<-bpTable%>%mutate(GOBranch="bp")
+ccTable<-ccTable%>%mutate(GOBranch="cc")
+mfTable<-mfTable%>%mutate(GOBranch="mf")
+
+countTable<-rbind(bpTable,ccTable,mfTable)
+
+colnames(countTable)[c(2,3)]<-c("geneCount","offspringCount")
+#write.csv(countTable,"count_table.csv",row.names = FALSE)
+
+countTable<-read.csv("count_table.csv")
+
+countTable%>%filter(GOBranch=="mf")%>%ggplot(aes(x=offspringCount,y=geneCount))+geom_point()+scale_x_log10()+scale_y_log10()
+countTable%>%filter(GOBranch=="bp")%>%ggplot(aes(x=offspringCount,y=geneCount))+geom_point()+scale_x_log10()+scale_y_log10()
+countTable%>%filter(GOBranch=="cc")%>%ggplot(aes(x=offspringCount,y=geneCount))+geom_point()+scale_x_log10()+scale_y_log10()
+
+a<-goKnownTable%>%filter(GOLabel=="GO:0030054")
+
 ```
 
 ###Test different method
@@ -76,85 +265,46 @@ for(i in 1:nrow(index)){
 }
 
 write.csv(double_neighbors,"mnn_neighbors.csv")
-
-
+double_neighbors<-read.csv("mnn_neighbors.csv")
+colnames(double_neighbors)[1]<-"plasmoDBID"
 ```
-
-
-###Prepare GO terms
 
 ```{r}
-################ Get Go data and wrangle  ############################
-library("GO.db")
-###Prepare GO terms
-#MF: "GO:0003674"
-#BP: "GO:0008150"
-#CC: "GO:0005575"
+neighbors_100<-read.csv("knn_100_known.csv")
+neighbors_100<-t(neighbors_100)
+labels<-paste0("neighbour",1:100)
+colnames(neighbors_100)<-labels
 
-mfRoot<-"GO:0003674"
-bpRoot<-"GO:0008150"
-ccRoot<-"GO:0005575"
+write.table(neighbors_100,"total_neighbours.csv",sep="\t", quote = FALSE,row.names=FALSE)
 
-GO_data<-read.csv("PasmoDBID_and_GO_unprocessed.csv",stringsAsFactors = FALSE)
+GO_table%>%select(PlasmoDBID)%>%distinct()%>%dim()
 
-mfChildren<-GOMFCHILDREN[[mfRoot]]
-bpChildren<-GOBPCHILDREN[[bpRoot]]
-ccChildren<-GOCCCHILDREN[[ccRoot]]
-#nrow(GO_data)
-GO_table<-data.frame(plasomDBID=character(0),GOTerm=character(0),GOAncestor=character(0),GOBranch=character(0))
-for (j in 1:nrow(GO_data)){
-  obs<-GO_data[j,]
-  flag<-NULL
-  if(!is.null(GOBPANCESTOR[[obs[1,2]]])){
-    flag<-"bp"
-    ancester<-GOBPANCESTOR[[obs[1,2]]]
-    if(bpRoot== ancester[[1]]){
-      obs<-cbind(obs,bpRoot,flag)
-    }else{
-      for(i in ancester){
-        if (i %in% bpChildren){
-          obs<-cbind(obs,as.vector(i),flag)
-          break
-        }
-      }
-    }
-  }
-  if(!is.null(GOCCANCESTOR[[obs[1,2]]])){
-    flag<-"cc"
-    ancester<-GOCCANCESTOR[[obs[1,2]]]
-    if(ccRoot == ancester[[1]]){
-      obs<-cbind(obs,ccRoot,flag)
-    }else{
-        for(i in ancester){
-        if (i %in% ccChildren){
-          obs<-cbind(obs,as.vector(i),flag)
-          break
-        }
-      }
-    }
-  }
-  if(!is.null(GOMFANCESTOR[[obs[1,2]]])){
-    flag<-"mf"
-    ancester<-GOMFANCESTOR[[obs[1,2]]]
-    if(mfRoot == ancester[[1]]){
-      obs<-cbind(obs,mfRoot,flag)
-    }else{
-      for(i in ancester){
-        if (i %in% mfChildren){
-          obs<-cbind(obs,as.vector(i),flag)
-          break
-        }
-      }
-    }
-  }
-  if(is.null(flag))
-    next
-  colnames(obs)<-c("plasomDBID","GOTerm","GOAncestor","GOBranch")
-  GO_table<-rbind(GO_table,obs)
-  print(j)
-  
-}
+```
+
+```{r}
+data<-read.csv("expression.csv",header = TRUE)
+
+data[is.na(data)]<-0
+gene<- select(data,X)
+GO_table<-read.csv("GO_table2.csv")
+GO_table<-GO_table %>% select(plasomDBID,GOAncestor)
+names(GO_table)=c("X","label")
+GO_table %>% group_by(label)
+data=select(data,-X)
+km<-kmeans(data, centers=60,iter.max = 20)
+km_cluster<-km$cluster %>% data.frame()
+km_cluster<-data.frame(gene,km_cluster)
+names(km_cluster)=c("X","cluster")
+GO_label=left_join(GO_table,km_cluster)
+freq=GO_table %>% group_by(label) %>% summarise(frequency=n()/33493)
+GO_table %>% filter(label %in% c("GO:0044215","GO:0044217"))
+```
+
+```{r}
+accuracy_all<-read.table("accuracy_all.txt",sep="\t",stringsAsFactors = F,header=T)
+accuracy_all%>%ggplot(aes(x=k,y=acc,color="blue"))+geom_line()+geom_point()+scale_y_continuous(limit=c(0,1))+ggtitle("k vs Accuracy")
 
 
 ```
+
 
