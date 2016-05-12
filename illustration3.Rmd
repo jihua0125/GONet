@@ -1,0 +1,44 @@
+---
+title: "Illustration"
+output: html_document
+---
+
+illustration
+
+```{r}
+unk=read.csv("knn_50_unk.csv",header=TRUE)
+know=read.csv("knn_50_known.csv",header=TRUE)
+dat=data.frame(unk,know)
+unknown= dat %>% select(PFB0095c) %>% filter(row_number()<=10 &row_number()>1 )
+names(unknown)="X"
+edge=left_join(unknown,GO_table)
+edge=edge %>% filter(branch=="cc") %>% select(-branch) %>% mutate(interaction="go")
+unknown=unknown %>% mutate(interaction="cor")
+unknown=unknown %>% mutate(label="PFB0095c")
+network=rbind(unknown,edge)
+network=unique(network)
+write_csv(network,"illustration.txt")
+
+
+GO_table<-unique(GO_table)
+branch<-GO_table %>% select(plasomDBID,GOBranch)
+GO_table<-GO_table %>% select(plasomDBID,GOAncestor,GOBranch)
+names(GO_table)=c("X","label","branch")
+
+data<-read.csv("expression.csv",header = TRUE)
+mtx=select(data,X)
+for (i in 1:5552){ 
+value=select(dat,i) %>% mutate(value=1)
+  names(value)=c("X",as.character(i))
+  mtx=left_join(mtx,value,by="X")
+}
+rownames(mtx)<-mtx[,1]
+mtx=select(mtx,-X)
+names(mtx)=names(dat)
+mtx[is.na(mtx)]=0
+mtx=as.matrix(mtx)
+write_csv(mtx, "adjacency.csv")
+
+
+```
+
