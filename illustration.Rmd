@@ -1,0 +1,22 @@
+---
+title: "Illustration"
+output: html_document
+---
+
+illustration
+
+```{r}
+unk=read.csv("knn_50_unk.csv",header=TRUE)
+know=read.csv("knn_50_known.csv",header=TRUE)
+dat=data.frame(unk,know)
+unknown= dat %>% select(PFB0095c) %>% filter(row_number()<=10 &row_number()>1 )
+names(unknown)="X"
+edge=left_join(unknown,GO_table)
+edge=edge %>% filter(branch=="cc") %>% select(-branch) %>% mutate(interaction="go")
+unknown=unknown %>% mutate(interaction="cor")
+unknown=unknown %>% mutate(label="PFB0095c")
+network=rbind(unknown,edge)
+network=unique(network)
+write_csv(network,"illustration.txt")
+```
+
